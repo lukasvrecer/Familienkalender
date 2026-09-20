@@ -833,7 +833,14 @@ async function toggleTask(memberId, task){
     method: 'PATCH',
     body: JSON.stringify({ status: newStatus })
   });
-  renderTodoView();
+  refreshTodos();
+}
+
+// Zeichnet die aktuell sichtbare Todo-Ansicht neu (Todos-Tab ODER
+// das Todo-Panel im "Heute"-Tab – je nachdem, wo man gerade ist).
+function refreshTodos(){
+  if(activeTab === 'todos'){ renderTodoView(); }
+  else if(activeTab === 'today'){ renderTodayView(); }
 }
 
 async function deleteTask(memberId, taskId){
@@ -856,6 +863,7 @@ function switchTab(tab){
   document.getElementById('todoView').hidden = tab !== 'todos';
   document.querySelector('header .nav').style.display = tab === 'calendar' ? 'flex' : 'none';
   document.getElementById('fab').title = tab === 'todos' ? 'Neue Aufgabe' : 'Neuer Termin';
+  if(tab === 'calendar' && calendar){ calendar.updateSize(); }
   if(tab === 'todos' && taskListsReady){ renderTodoView(); }
   if(tab === 'today' && taskListsReady){ renderTodayView(); }
 }
@@ -1081,7 +1089,7 @@ document.getElementById('todoForm').addEventListener('submit', async (e) => {
   submitBtn.disabled = false;
   submitBtn.textContent = 'Speichern';
   todoDialog.close();
-  renderTodoView();
+  refreshTodos();
 });
 
 async function createSeries(memberId, title, weekdays, start, end, segment){
@@ -1117,7 +1125,7 @@ document.getElementById('todoDeleteBtn').addEventListener('click', async () => {
   if(editingSeriesId && confirm('Diese Aufgabe (alle Tage) wirklich löschen?')){
     await deleteSeriesTasks(editingSeriesMemberId, editingSeriesId);
     todoDialog.close();
-    renderTodoView();
+    refreshTodos();
   }
 });
 
@@ -1195,7 +1203,7 @@ document.getElementById('manageTodosBtn').addEventListener('click', async () => 
       if(confirm('Diese Aufgabe (alle Tage) wirklich löschen?')){
         await deleteSeriesTasks(g.memberId, g.seriesId);
         document.getElementById('manageTodosBtn').click();
-        renderTodoView();
+        refreshTodos();
       }
     });
     list.appendChild(row);

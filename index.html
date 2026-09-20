@@ -774,6 +774,7 @@ function appendMemberTodos(col, member, tasks, ds){
   });
 }
 function rfc3339(ds){ return ds + 'T00:00:00.000Z'; }
+function rfc3339End(ds){ return ds + 'T23:59:59.999Z'; }
 const WEEKDAY_LABELS = { 0:'So', 1:'Mo', 2:'Di', 3:'Mi', 4:'Do', 5:'Fr', 6:'Sa' };
 
 /* ---------- Tasklisten pro Familienmitglied anlegen/finden ---------- */
@@ -805,7 +806,7 @@ async function fetchTasksInRange(memberId, fromDs, toDs){
   const url = TASKS_API + '/lists/' + listId + '/tasks'
     + '?showCompleted=true&showHidden=true&maxResults=100'
     + '&dueMin=' + encodeURIComponent(rfc3339(fromDs))
-    + '&dueMax=' + encodeURIComponent(rfc3339(toDs));
+    + '&dueMax=' + encodeURIComponent(rfc3339End(toDs));
   const data = await apiFetch(url);
   return data.items || [];
 }

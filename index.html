@@ -147,17 +147,17 @@
   #eventDialog form, #todoDialog form{ padding:1.6rem; display:flex; flex-direction:column; gap:1.1rem; }
   #eventDialog h2, #todoDialog h2{ font-family:var(--font-display); font-weight:600; font-size:1.4rem; margin:0 0 0.1rem; letter-spacing:-0.01em; }
   #eventDialog label, #todoDialog label{ font-size:0.72rem; color:var(--ink-soft); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; display:block; margin-bottom:0.4rem; }
-  #eventDialog input[type=text], #eventDialog input[type=datetime-local], #eventDialog input[type=date],
+  #eventDialog input[type=text], #eventDialog input[type=datetime-local], #eventDialog input[type=date], #eventDialog select,
   #todoDialog input[type=text], #todoDialog input[type=date], #todoDialog select{
     width:100%; font-family:var(--font-body); font-size:1rem; padding:0.75rem 0.85rem;
     border:1.5px solid var(--line); border-radius:12px; background:#fff; color:var(--ink);
     transition:border-color .15s ease, box-shadow .15s ease; appearance:none;
   }
-  #todoDialog select{
+  #eventDialog select, #todoDialog select{
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%236B655A'><path d='M5.5 7.5l4.5 4.5 4.5-4.5z'/></svg>");
     background-repeat:no-repeat; background-position:right 0.8rem center; padding-right:2.2rem;
   }
-  #eventDialog input:focus, #todoDialog input:focus, #todoDialog select:focus{
+  #eventDialog input:focus, #eventDialog select:focus, #todoDialog input:focus, #todoDialog select:focus{
     outline:none; border-color:var(--pine); box-shadow:0 0 0 3px rgba(63,102,89,0.18);
   }
   #eventDialog .row, #todoDialog .row{ display:flex; gap:0.75rem; }
@@ -384,6 +384,11 @@
       <input type="text" id="f_title" required>
     </div>
 
+    <div>
+      <label for="f_member">Für</label>
+      <select id="f_member"></select>
+    </div>
+
     <div class="checkbox">
       <input type="checkbox" id="f_allday">
       <label for="f_allday">Ganztägig</label>
@@ -565,7 +570,7 @@ function fetchEvents(info, successCallback, failureCallback){
         end: ev.end.dateTime || ev.end.date,
         allDay: !ev.start.dateTime,
         backgroundColor: GOOGLE_COLORS[ev.colorId] || 'var(--pine)',
-        extendedProps: { location: ev.location || '' }
+        extendedProps: { location: ev.location || '', colorId: ev.colorId || '' }
       }));
       successCallback(events);
     })
@@ -617,7 +622,8 @@ function initCalendar(){
       start: info.event.startStr,
       end: info.event.endStr,
       allDay: info.event.allDay,
-      location: info.event.extendedProps.location
+      location: info.event.extendedProps.location,
+      colorId: info.event.extendedProps.colorId
     })
   });
   calendar.render();
@@ -650,6 +656,12 @@ function toLocalInputValue(dateStr, allDay){
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function populateEventMemberSelect(){
+  const select = document.getElementById('f_member');
+  select.innerHTML = '<option value="">Ganze Familie</option>' +
+    CONFIG.FAMILY_MEMBERS.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+}
+
 function openDialog(data){
   editingEventId = data.id || null;
   document.getElementById('dialogTitle').textContent = editingEventId ? 'Termin bearbeiten' : 'Neuer Termin';
@@ -659,6 +671,11 @@ function openDialog(data){
   document.getElementById('f_start').value = toLocalInputValue(data.start, data.allDay);
   document.getElementById('f_end').value = toLocalInputValue(data.end || data.start, data.allDay);
   document.getElementById('deleteBtn').style.display = editingEventId ? 'inline-block' : 'none';
+
+  populateEventMemberSelect();
+  const owner = CONFIG.FAMILY_MEMBERS.find(m => String(m.colorId) === String(data.colorId));
+  document.getElementById('f_member').value = owner ? owner.id : '';
+
   dialog.showModal();
 }
 
@@ -667,12 +684,16 @@ document.getElementById('cancelBtn').addEventListener('click', () => dialog.clos
 document.getElementById('eventForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const allDay = document.getElementById('f_allday').checked;
+  const memberId = document.getElementById('f_member').value;
+  const owner = memberId ? memberById(memberId) : null;
   const payload = {
     summary: document.getElementById('f_title').value,
     location: document.getElementById('f_location').value || undefined,
     start: toGoogleTime(document.getElementById('f_start').value, allDay),
     end: toGoogleTime(document.getElementById('f_end').value, allDay)
   };
+  if(owner){ payload.colorId = String(owner.colorId); }
+  else if(editingEventId){ payload.colorId = null; } // Farbe beim Bearbeiten gezielt zurücksetzen
   await saveEvent(payload, editingEventId);
   dialog.close();
 });
@@ -850,14 +871,12 @@ async function ensureTaskLists(){
 
 /* ---------- Tasks lesen ---------- */
 async function fetchTasksInRange(memberId, fromDs, toDs){
-  const listId = taskLists[memberId];
-  if(!listId) return [];
-  const url = TASKS_API + '/lists/' + listId + '/tasks'
-    + '?showCompleted=true&showHidden=true&maxResults=100'
-    + '&dueMin=' + encodeURIComponent(rfc3339(fromDs))
-    + '&dueMax=' + encodeURIComponent(rfc3339End(toDs));
-  const data = await apiFetch(url);
-  return data.items || [];
+  const all = await fetchAllTasks(memberId);
+  return all.filter(t => {
+    if(!t.due) return false;
+    const ds = t.due.slice(0,10);
+    return ds >= fromDs && ds <= toDs;
+  });
 }
 
 // Holt ALLE Tasks einer Liste (mit Paginierung) – für die Verwalten-Ansicht.
@@ -1424,7 +1443,8 @@ function eventToDialogData(ev){
     start: ev.start.dateTime || ev.start.date,
     end: ev.end.dateTime || ev.end.date,
     allDay: !ev.start.dateTime,
-    location: ev.location || ''
+    location: ev.location || '',
+    colorId: ev.colorId
   };
 }
 

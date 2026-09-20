@@ -128,29 +128,53 @@
     box-shadow:0 6px 18px rgba(43,42,40,0.25); cursor:pointer;
   }
 
-  /* ---------- Termin-Dialog ---------- */
-  dialog#eventDialog{
-    border:none; border-radius:16px; padding:0; width:min(92vw, 420px);
+  /* ---------- Termin- & Aufgaben-Dialog (gemeinsames Grundgerüst) ---------- */
+  dialog#eventDialog, dialog#todoDialog{
+    border:none; border-radius:24px; padding:0; width:min(92vw, 420px);
     background:var(--panel); color:var(--ink);
+    box-shadow: 0 24px 60px -16px rgba(43,42,40,0.38), 0 0 0 1px rgba(220,211,190,0.7);
+    opacity:1; transform:scale(1) translateY(0);
+    transition: opacity .2s ease, transform .2s ease, overlay .2s ease allow-discrete, display .2s ease allow-discrete;
   }
-  dialog#eventDialog::backdrop{ background:rgba(43,42,40,0.45); }
-  #eventDialog form{ padding:1.5rem; display:flex; flex-direction:column; gap:0.9rem; }
-  #eventDialog h2{ font-family:var(--font-display); font-weight:600; font-size:1.3rem; margin:0 0 0.2rem; }
-  #eventDialog label{ font-size:0.85rem; color:var(--ink-soft); font-weight:600; display:block; margin-bottom:0.3rem; }
-  #eventDialog input[type=text], #eventDialog input[type=datetime-local], #eventDialog input[type=date]{
-    width:100%; font-family:var(--font-body); font-size:1rem; padding:0.65rem 0.7rem;
-    border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink);
+  dialog#eventDialog::backdrop, dialog#todoDialog::backdrop{
+    background:rgba(43,42,40,0.5); backdrop-filter:blur(3px);
+    opacity:1; transition:opacity .2s ease, overlay .2s ease allow-discrete, display .2s ease allow-discrete;
   }
-  #eventDialog .row{ display:flex; gap:0.75rem; }
-  #eventDialog .row > div{ flex:1; }
+  @starting-style{
+    dialog#eventDialog[open], dialog#todoDialog[open]{ opacity:0; transform:scale(0.94) translateY(6px); }
+    dialog#eventDialog[open]::backdrop, dialog#todoDialog[open]::backdrop{ opacity:0; }
+  }
+  #eventDialog form, #todoDialog form{ padding:1.6rem; display:flex; flex-direction:column; gap:1.1rem; }
+  #eventDialog h2, #todoDialog h2{ font-family:var(--font-display); font-weight:600; font-size:1.4rem; margin:0 0 0.1rem; letter-spacing:-0.01em; }
+  #eventDialog label, #todoDialog label{ font-size:0.72rem; color:var(--ink-soft); font-weight:700; text-transform:uppercase; letter-spacing:0.05em; display:block; margin-bottom:0.4rem; }
+  #eventDialog input[type=text], #eventDialog input[type=datetime-local], #eventDialog input[type=date],
+  #todoDialog input[type=text], #todoDialog input[type=date], #todoDialog select{
+    width:100%; font-family:var(--font-body); font-size:1rem; padding:0.75rem 0.85rem;
+    border:1.5px solid var(--line); border-radius:12px; background:#fff; color:var(--ink);
+    transition:border-color .15s ease, box-shadow .15s ease; appearance:none;
+  }
+  #todoDialog select{
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%236B655A'><path d='M5.5 7.5l4.5 4.5 4.5-4.5z'/></svg>");
+    background-repeat:no-repeat; background-position:right 0.8rem center; padding-right:2.2rem;
+  }
+  #eventDialog input:focus, #todoDialog input:focus, #todoDialog select:focus{
+    outline:none; border-color:var(--pine); box-shadow:0 0 0 3px rgba(63,102,89,0.18);
+  }
+  #eventDialog .row, #todoDialog .row{ display:flex; gap:0.75rem; }
+  #eventDialog .row > div, #todoDialog .row > div{ flex:1; }
   #eventDialog .checkbox{ display:flex; align-items:center; gap:0.5rem; }
-  #eventDialog .checkbox label{ margin:0; }
-  #eventDialog .actions{ display:flex; justify-content:space-between; align-items:center; margin-top:0.5rem; }
-  #eventDialog .actions .right{ display:flex; gap:0.5rem; }
-  #eventDialog button{ font-family:var(--font-body); font-weight:600; font-size:0.95rem;
-    border-radius:10px; padding:0.6rem 1.1rem; border:1px solid var(--line); background:#fff; cursor:pointer; }
-  #eventDialog button.primary{ background:var(--pine); color:#fff; border-color:var(--pine); }
-  #eventDialog button.danger{ background:none; color:var(--coral); border:none; padding:0.6rem 0; }
+  #eventDialog .checkbox label{ margin:0; text-transform:none; font-weight:600; font-size:0.9rem; letter-spacing:0; }
+  #eventDialog .actions, #todoDialog .actions{ display:flex; justify-content:space-between; align-items:center; margin-top:0.3rem; }
+  #eventDialog .actions .right, #todoDialog .actions .right{ display:flex; gap:0.6rem; }
+  #eventDialog button, #todoDialog button{ font-family:var(--font-body); font-weight:600; font-size:0.95rem;
+    border-radius:12px; padding:0.7rem 1.2rem; border:1.5px solid var(--line); background:#fff; color:var(--ink); cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease, background .15s ease; }
+  #eventDialog button.primary, #todoDialog button.primary{
+    background:var(--pine); color:#fff; border-color:var(--pine);
+    box-shadow:0 8px 20px -6px rgba(63,102,89,0.55);
+  }
+  #eventDialog button.primary:active, #todoDialog button.primary:active{ transform:scale(0.97); }
+  #eventDialog button.danger, #todoDialog button.danger{ background:none; color:var(--coral); border:none; padding:0.7rem 0; }
 
   /* ---------- Tabs ---------- */
   .tabbar{ display:flex; gap:0.5rem; padding:0.75rem 1.5rem 0; background:var(--panel); border-bottom:1px solid var(--line); }
@@ -198,17 +222,42 @@
   .todo-chip .todo-check{ width:1.05rem; height:1.05rem; font-size:0.65rem; }
   .todo-chip.done .todo-label{ text-decoration:line-through; color:var(--ink-soft); }
 
-  /* ---------- Wochentag-Auswahl im Dialog ---------- */
+  /* ---------- Wochentag-Auswahl im Dialog (runde Tages-Chips) ---------- */
   .weekday-picker{ display:flex; gap:0.4rem; flex-wrap:wrap; }
-  .weekday-picker button{
-    font-family:var(--font-body); font-weight:600; font-size:0.85rem;
-    border:1px solid var(--line); background:#fff; color:var(--ink);
-    border-radius:8px; padding:0.5rem 0.6rem; cursor:pointer;
+  #weekdayPicker{ flex-wrap:nowrap; }
+  #weekdayPicker button{
+    flex:1; aspect-ratio:1; min-width:0;
+    font-family:var(--font-body); font-weight:700; font-size:0.8rem;
+    border:1.5px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:50%; padding:0; cursor:pointer;
+    transition:transform .12s ease, background .15s ease, box-shadow .15s ease;
   }
-  .weekday-picker button.active{ background:var(--pine); color:#fff; border-color:var(--pine); }
+  #weekdayPicker button.active{
+    background:var(--pine); color:#fff; border-color:var(--pine); transform:scale(1.06);
+    box-shadow:0 6px 14px -4px rgba(63,102,89,0.55);
+  }
+
+  /* ---------- Tageszeit-Auswahl im Dialog (Kacheln mit Icon) ---------- */
+  #segmentPicker{ gap:0.6rem; }
+  #segmentPicker button{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:0.3rem;
+    font-family:var(--font-body); font-weight:600; font-size:0.8rem;
+    border:1.5px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:14px; padding:0.7rem 0.4rem; cursor:pointer;
+    transition:transform .12s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  #segmentPicker button::before{ font-size:1.3rem; line-height:1; }
+  #segmentPicker button[data-segment="frueh"]::before{ content:"🌅"; }
+  #segmentPicker button[data-segment="nachmittag"]::before{ content:"☀️"; }
+  #segmentPicker button[data-segment="abend"]::before{ content:"🌙"; }
+  #segmentPicker button.active{
+    background:var(--pine); color:#fff; border-color:var(--pine); transform:translateY(-2px);
+    box-shadow:0 10px 22px -8px rgba(63,102,89,0.6);
+  }
 
   /* ---------- Verwalten-Dialog ---------- */
-  dialog#manageDialog{ border:none; border-radius:16px; padding:0; width:min(92vw, 460px); max-height:80vh; background:var(--panel); color:var(--ink); }
+  dialog#manageDialog{ border:none; border-radius:22px; padding:0; width:min(92vw, 460px); max-height:80vh; background:var(--panel); color:var(--ink);
+    box-shadow: 0 24px 60px -16px rgba(43,42,40,0.38), 0 0 0 1px rgba(220,211,190,0.7); }
   dialog#manageDialog::backdrop{ background:rgba(43,42,40,0.45); }
   #manageDialog .inner{ padding:1.5rem; display:flex; flex-direction:column; gap:0.9rem; max-height:80vh; overflow:auto; }
   #manageDialog h2{ font-family:var(--font-display); font-weight:600; font-size:1.3rem; margin:0; }
@@ -1225,8 +1274,8 @@ let todayRefreshTimer = null;
 
 async function fetchRawEvents(fromDs, toDs){
   const url = API_BASE + '?singleEvents=true&orderBy=startTime'
-    + '&timeMin=' + encodeURIComponent(fromDs + 'T00:00:00')
-    + '&timeMax=' + encodeURIComponent(toDs + 'T23:59:59');
+    + '&timeMin=' + encodeURIComponent(rfc3339(fromDs))
+    + '&timeMax=' + encodeURIComponent(rfc3339End(toDs));
   const data = await apiFetch(url);
   return data.items || [];
 }
@@ -1237,14 +1286,18 @@ async function renderTodayView(){
   const fromDs = dateStr(todayDate);
   const toDs = dateStr(tomorrowDate);
 
-  const events = await fetchRawEvents(fromDs, toDs);
-
   const grid = document.getElementById('todayGrid');
-  grid.innerHTML = '';
-  grid.appendChild(buildTodayDayBlock('Heute', todayDate, events));
-  grid.appendChild(buildTodayDayBlock('Morgen', tomorrowDate, events));
 
-  await renderTodayTodoPanel(fromDs);
+  try{
+    const events = await fetchRawEvents(fromDs, toDs);
+    grid.innerHTML = '';
+    grid.appendChild(buildTodayDayBlock('Heute', todayDate, events));
+    grid.appendChild(buildTodayDayBlock('Morgen', tomorrowDate, events));
+    await renderTodayTodoPanel(fromDs);
+  } catch(err){
+    grid.innerHTML = '<div class="todo-empty">Fehler beim Laden: ' + err.message + '</div>';
+    console.error('Heute-Ansicht:', err);
+  }
 
   if(todayRefreshTimer){ clearInterval(todayRefreshTimer); }
   todayRefreshTimer = setInterval(() => { if(activeTab === 'today'){ renderTodayView(); } }, 5 * 60 * 1000);

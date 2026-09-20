@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Familienkalender</title>
+
+<!-- ================================================================
+     KONFIGURATION – hier eure Daten eintragen, sonst nichts ändern
+     ================================================================ -->
+<script>
+  const CONFIG = {
+    // OAuth Client-ID aus der Google Cloud Console (Typ "Webanwendung")
+    CLIENT_ID: "DEINE_CLIENT_ID.apps.googleusercontent.com",
+
+    // Kalender-ID des freigegebenen Familienkalenders.
+    // Zu finden in Google Kalender -> Zahnrad -> Einstellungen -> auf den
+    // Kalendernamen klicken -> "Kalender integrieren" -> "Kalender-ID"
+    // (sieht meist aus wie "xxxxxxx@group.calendar.google.com")
+    CALENDAR_ID: "DEINE_KALENDER_ID@group.calendar.google.com",
+
+    // Berechtigungen: nur Termine lesen/schreiben, sonst nichts
+    SCOPE: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/tasks",
+
+    // Familienmitglieder für die Todo-Listen – Namen/Farben anpassen,
+    // Zeilen hinzufügen oder löschen nach Bedarf.
+    FAMILY_MEMBERS: [
+      { id: "mama",  name: "Mama",   color: "#7A5980" },
+      { id: "papa",  name: "Papa",   color: "#4C6B8A" },
+      { id: "kind1", name: "Kind 1", color: "#D9A441" }
+    ]
+  };
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<link href="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/6.1.11/index.global.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/6.1.11/index.global.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/6.1.11/locales/de.global.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<style>
+  :root{
+    --paper:   #EDE6D6;
+    --panel:   #FBF8F1;
+    --ink:     #2B2A28;
+    --ink-soft:#6B655A;
+    --pine:    #3F6659;
+    --coral:   #C1603C;
+    --line:    #DCD3BE;
+    --today:   #F0DFAE;
+    --font-display: 'Fraunces', serif;
+    --font-body: 'Inter', sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; overscroll-behavior:none; }
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--font-body);
+    display:flex;
+    flex-direction:column;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+
+  /* ---------- Anmelde-Overlay ---------- */
+  #signin{
+    position:fixed; inset:0; z-index:50;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:var(--paper); gap:1.25rem; text-align:center; padding:2rem;
+  }
+  #signin h1{
+    font-family:var(--font-display); font-weight:600; font-size:2.4rem; margin:0;
+  }
+  #signin p{ color:var(--ink-soft); max-width:32ch; margin:0; font-size:1.05rem; }
+  #signin button{
+    font-family:var(--font-body); font-weight:600; font-size:1.1rem;
+    padding:0.9rem 1.8rem; border-radius:999px; border:none;
+    background:var(--pine); color:#fff; cursor:pointer;
+  }
+  #signin.hidden{ display:none; }
+  #signin .error{ color:var(--coral); font-weight:600; font-size:0.95rem; min-height:1.2em; }
+
+  /* ---------- Kopfzeile ---------- */
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:1.1rem 1.5rem; border-bottom:1px solid var(--line);
+    background:var(--panel);
+  }
+  header .title{
+    font-family:var(--font-display); font-weight:600; font-size:1.6rem; margin:0;
+  }
+  header .nav{ display:flex; gap:0.5rem; align-items:center; }
+  header button{
+    font-family:var(--font-body); font-weight:600; font-size:0.95rem;
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:10px; padding:0.55rem 0.9rem; cursor:pointer;
+  }
+  header button.active{ background:var(--pine); color:#fff; border-color:var(--pine); }
+
+  /* ---------- Kalender ---------- */
+  main{ flex:1; padding:1rem 1.5rem 6rem; overflow:auto; }
+  #calendar{ background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:0.75rem; }
+
+  .fc{ font-family:var(--font-body); }
+  .fc .fc-toolbar{ display:none; } /* eigene Kopfzeile wird stattdessen benutzt */
+  .fc-theme-standard td, .fc-theme-standard th{ border-color:var(--line); }
+  .fc-col-header-cell-cushion{ color:var(--ink-soft); font-weight:600; text-transform:none; padding:0.6rem 0; }
+  .fc-daygrid-day-number{ color:var(--ink); font-weight:500; padding:0.4rem; }
+  .fc-day-today{ background:var(--today) !important; }
+  .fc-event{ border:none; border-radius:7px; padding:1px 4px; font-weight:500; font-size:0.85rem; }
+  .fc-timegrid-slot-label{ color:var(--ink-soft); }
+
+  /* ---------- Schwebender "Neu"-Button ---------- */
+  #fab{
+    position:fixed; right:1.5rem; bottom:1.5rem; z-index:20;
+    width:4rem; height:4rem; border-radius:50%; border:none;
+    background:var(--coral); color:#fff; font-size:2rem; line-height:1;
+    box-shadow:0 6px 18px rgba(43,42,40,0.25); cursor:pointer;
+  }
+
+  /* ---------- Termin-Dialog ---------- */
+  dialog#eventDialog{
+    border:none; border-radius:16px; padding:0; width:min(92vw, 420px);
+    background:var(--panel); color:var(--ink);
+  }
+  dialog#eventDialog::backdrop{ background:rgba(43,42,40,0.45); }
+  #eventDialog form{ padding:1.5rem; display:flex; flex-direction:column; gap:0.9rem; }
+  #eventDialog h2{ font-family:var(--font-display); font-weight:600; font-size:1.3rem; margin:0 0 0.2rem; }
+  #eventDialog label{ font-size:0.85rem; color:var(--ink-soft); font-weight:600; display:block; margin-bottom:0.3rem; }
+  #eventDialog input[type=text], #eventDialog input[type=datetime-local], #eventDialog input[type=date]{
+    width:100%; font-family:var(--font-body); font-size:1rem; padding:0.65rem 0.7rem;
+    border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink);
+  }
+  #eventDialog .row{ display:flex; gap:0.75rem; }
+  #eventDialog .row > div{ flex:1; }
+  #eventDialog .checkbox{ display:flex; align-items:center; gap:0.5rem; }
+  #eventDialog .checkbox label{ margin:0; }
+  #eventDialog .actions{ display:flex; justify-content:space-between; align-items:center; margin-top:0.5rem; }
+  #eventDialog .actions .right{ display:flex; gap:0.5rem; }
+  #eventDialog button{ font-family:var(--font-body); font-weight:600; font-size:0.95rem;
+    border-radius:10px; padding:0.6rem 1.1rem; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  #eventDialog button.primary{ background:var(--pine); color:#fff; border-color:var(--pine); }
+  #eventDialog button.danger{ background:none; color:var(--coral); border:none; padding:0.6rem 0; }
+
+  /* ---------- Tabs ---------- */
+  .tabbar{ display:flex; gap:0.5rem; padding:0.75rem 1.5rem 0; background:var(--panel); border-bottom:1px solid var(--line); }
+  .tabbar .tab{
+    font-family:var(--font-body); font-weight:600; font-size:0.95rem;
+    border:none; background:none; color:var(--ink-soft);
+    padding:0.6rem 0.2rem; cursor:pointer; border-bottom:3px solid transparent;
+  }
+  .tabbar .tab.active{ color:var(--pine); border-bottom-color:var(--pine); }
+
+  /* ---------- Todo-Toolbar ---------- */
+  .todo-toolbar{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.6rem; margin-bottom:0.9rem; }
+  .todo-nav{ display:flex; align-items:center; gap:0.5rem; }
+  .todo-nav button, .todo-viewswitch button{
+    font-family:var(--font-body); font-weight:600; font-size:0.9rem;
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:10px; padding:0.5rem 0.8rem; cursor:pointer;
+  }
+  .todo-viewswitch{ display:flex; gap:0.5rem; }
+  .todo-viewswitch button.active{ background:var(--pine); color:#fff; border-color:var(--pine); }
+  #todoDateLabel{ font-family:var(--font-display); font-weight:600; font-size:1.15rem; margin-left:0.3rem; }
+
+  /* ---------- Tagesansicht ---------- */
+  .todo-day-grid{ display:flex; gap:1rem; flex-wrap:wrap; }
+  .todo-member-col{ flex:1 1 220px; background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:1rem; }
+  .todo-member-head{ display:flex; align-items:center; gap:0.5rem; margin-bottom:0.7rem; }
+  .todo-dot{ width:0.7rem; height:0.7rem; border-radius:50%; flex:none; }
+  .todo-member-head h3{ font-family:var(--font-display); font-weight:600; font-size:1.1rem; margin:0; }
+  .todo-item{ display:flex; align-items:center; gap:0.6rem; padding:0.55rem 0.2rem; border-bottom:1px solid var(--line); cursor:pointer; }
+  .todo-item:last-child{ border-bottom:none; }
+  .todo-check{ width:1.3rem; height:1.3rem; border-radius:50%; border:2px solid var(--ink-soft); flex:none; display:flex; align-items:center; justify-content:center; font-size:0.8rem; color:#fff; }
+  .todo-item.done .todo-check{ background:var(--pine); border-color:var(--pine); }
+  .todo-item.done .todo-label{ text-decoration:line-through; color:var(--ink-soft); }
+  .todo-label{ flex:1; font-size:0.95rem; }
+  .todo-edit{ border:none; background:none; color:var(--ink-soft); font-size:1rem; cursor:pointer; padding:0.2rem; }
+  .todo-empty{ color:var(--ink-soft); font-size:0.9rem; }
+
+  /* ---------- Wochenansicht ---------- */
+  .todo-week-grid{ overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:0.75rem; }
+  table.todo-week-table{ border-collapse:collapse; width:100%; min-width:760px; }
+  table.todo-week-table th{ font-family:var(--font-body); font-weight:600; color:var(--ink-soft); text-align:left; padding:0.5rem 0.6rem; border-bottom:1px solid var(--line); font-size:0.85rem; }
+  table.todo-week-table td{ vertical-align:top; padding:0.5rem 0.6rem; border-bottom:1px solid var(--line); border-right:1px solid var(--line); min-width:120px; }
+  table.todo-week-table td:last-child{ border-right:none; }
+  .todo-chip{ display:flex; align-items:center; gap:0.35rem; padding:0.3rem 0; cursor:pointer; font-size:0.85rem; }
+  .todo-chip .todo-check{ width:1.05rem; height:1.05rem; font-size:0.65rem; }
+  .todo-chip.done .todo-label{ text-decoration:line-through; color:var(--ink-soft); }
+
+  /* ---------- Wochentag-Auswahl im Dialog ---------- */
+  .weekday-picker{ display:flex; gap:0.4rem; flex-wrap:wrap; }
+  .weekday-picker button{
+    font-family:var(--font-body); font-weight:600; font-size:0.85rem;
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:8px; padding:0.5rem 0.6rem; cursor:pointer;
+  }
+  .weekday-picker button.active{ background:var(--pine); color:#fff; border-color:var(--pine); }
+
+  /* ---------- Verwalten-Dialog ---------- */
+  dialog#manageDialog{ border:none; border-radius:16px; padding:0; width:min(92vw, 460px); max-height:80vh; background:var(--panel); color:var(--ink); }
+  dialog#manageDialog::backdrop{ background:rgba(43,42,40,0.45); }
+  #manageDialog .inner{ padding:1.5rem; display:flex; flex-direction:column; gap:0.9rem; max-height:80vh; overflow:auto; }
+  #manageDialog h2{ font-family:var(--font-display); font-weight:600; font-size:1.3rem; margin:0; }
+  .manage-row{ display:flex; align-items:center; justify-content:space-between; gap:0.6rem; padding:0.6rem 0; border-bottom:1px solid var(--line); }
+  .manage-row .info{ cursor:pointer; flex:1; }
+  .manage-row .info strong{ display:block; font-size:0.95rem; }
+  .manage-row .info span{ display:block; font-size:0.8rem; color:var(--ink-soft); }
+  .manage-row button{ border:none; background:none; color:var(--coral); font-size:1.2rem; cursor:pointer; }
+  #manageCloseBtn{ align-self:flex-end; font-family:var(--font-body); font-weight:600; border:1px solid var(--line); background:#fff; border-radius:10px; padding:0.5rem 1rem; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<div id="signin">
+  <h1>Familienkalender</h1>
+  <p>Einmal anmelden, dann bleibt dieses Gerät angemeldet.</p>
+  <button id="signInBtn">Mit Google anmelden</button>
+  <div class="error" id="signinError"></div>
+</div>
+
+<header>
+  <h1 class="title" id="titleLabel">Familienkalender</h1>
+  <div class="nav">
+    <button id="prevBtn">‹</button>
+    <button id="todayBtn">Heute</button>
+    <button id="nextBtn">›</button>
+    <button id="viewMonth">Monat</button>
+    <button id="viewWeek">Woche</button>
+  </div>
+</header>
+
+<div class="tabbar">
+  <button id="tabCalendar" class="tab active">Kalender</button>
+  <button id="tabTodos" class="tab">Todos</button>
+</div>
+
+<main>
+  <section id="calendarView">
+    <div id="calendar"></div>
+  </section>
+
+  <section id="todoView" hidden>
+    <div class="todo-toolbar">
+      <div class="todo-nav">
+        <button id="todoPrev">‹</button>
+        <button id="todoToday">Heute</button>
+        <button id="todoNext">›</button>
+        <span id="todoDateLabel"></span>
+      </div>
+      <div class="todo-viewswitch">
+        <button id="todoDayBtn" class="active">Tag</button>
+        <button id="todoWeekBtn">Woche</button>
+        <button id="manageTodosBtn">Verwalten</button>
+      </div>
+    </div>
+    <div id="todoDayGrid" class="todo-day-grid"></div>
+    <div id="todoWeekGrid" class="todo-week-grid" hidden></div>
+  </section>
+</main>
+
+<button id="fab" title="Neu">+</button>
+
+<dialog id="eventDialog">
+  <form id="eventForm">
+    <h2 id="dialogTitle">Neuer Termin</h2>
+
+    <div>
+      <label for="f_title">Titel</label>
+      <input type="text" id="f_title" required>
+    </div>
+
+    <div class="checkbox">
+      <input type="checkbox" id="f_allday">
+      <label for="f_allday">Ganztägig</label>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="f_start">Beginn</label>
+        <input type="datetime-local" id="f_start" required>
+      </div>
+      <div>
+        <label for="f_end">Ende</label>
+        <input type="datetime-local" id="f_end" required>
+      </div>
+    </div>
+
+    <div>
+      <label for="f_location">Ort (optional)</label>
+      <input type="text" id="f_location">
+    </div>
+
+    <div class="actions">
+      <button type="button" class="danger" id="deleteBtn" style="display:none;">Löschen</button>
+      <div class="right">
+        <button type="button" id="cancelBtn">Abbrechen</button>
+        <button type="submit" class="primary">Speichern</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="todoDialog">
+  <form id="todoForm">
+    <h2 id="todoDialogTitle">Neue Aufgabe</h2>
+
+    <div>
+      <label for="t_title">Titel</label>
+      <input type="text" id="t_title" required>
+    </div>
+
+    <div>
+      <label for="t_member">Für</label>
+      <select id="t_member"></select>
+    </div>
+
+    <div>
+      <label>Wochentage</label>
+      <div class="weekday-picker" id="weekdayPicker">
+        <button type="button" data-day="1">Mo</button>
+        <button type="button" data-day="2">Di</button>
+        <button type="button" data-day="3">Mi</button>
+        <button type="button" data-day="4">Do</button>
+        <button type="button" data-day="5">Fr</button>
+        <button type="button" data-day="6">Sa</button>
+        <button type="button" data-day="0">So</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="t_start">Startdatum</label>
+        <input type="date" id="t_start" required>
+      </div>
+      <div>
+        <label for="t_end">Enddatum</label>
+        <input type="date" id="t_end" required>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="danger" id="todoDeleteBtn" style="display:none;">Löschen</button>
+      <div class="right">
+        <button type="button" id="todoCancelBtn">Abbrechen</button>
+        <button type="submit" class="primary">Speichern</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="manageDialog">
+  <div class="inner">
+    <h2>Aufgaben verwalten</h2>
+    <div id="manageList"></div>
+    <button id="manageCloseBtn" type="button">Schließen</button>
+  </div>
+</dialog>
+
+<script>
+/* ==================================================================
+   Google-Anmeldung (kein eigener Server nötig)
+   ================================================================== */
+let accessToken = null;
+let tokenClient = null;
+let calendar = null;
+let editingEventId = null;
+
+function initGoogle(){
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.CLIENT_ID,
+    scope: CONFIG.SCOPE,
+    callback: (resp) => {
+      if(resp.error){
+        document.getElementById('signinError').textContent = 'Anmeldung fehlgeschlagen: ' + resp.error;
+        return;
+      }
+      accessToken = resp.access_token;
+      document.getElementById('signin').classList.add('hidden');
+      startSilentRefresh();
+      if(!calendar){ initCalendar(); } else { calendar.refetchEvents(); }
+      ensureTaskLists();
+    }
+  });
+  document.getElementById('signInBtn').addEventListener('click', () => {
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+  });
+}
+
+// Ein einmal angemeldetes Gerät soll den Zugriffs-Token automatisch
+// erneuern, solange der Browser bei Google angemeldet bleibt.
+function startSilentRefresh(){
+  setInterval(() => {
+    tokenClient.requestAccessToken({ prompt: '' });
+  }, 45 * 60 * 1000); // alle 45 Minuten
+}
+
+/* ==================================================================
+   Google Calendar API – Termine lesen/schreiben
+   ================================================================== */
+const API_BASE = 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(CONFIG.CALENDAR_ID) + '/events';
+
+// Google-Kalenderfarben ungefähr in Web-Hex, damit Termine so
+// eingefärbt erscheinen wie die Familie sie in Google Kalender selbst
+// eingefärbt hat.
+const GOOGLE_COLORS = {
+  1:'#7986CB', 2:'#33B679', 3:'#8E24AA', 4:'#E67C73', 5:'#F6BF26',
+  6:'#F4511E', 7:'#039BE5', 8:'#616161', 9:'#3F51B5', 10:'#0B8043', 11:'#D50000'
+};
+
+async function apiFetch(url, options={}){
+  const res = await fetch(url, {
+    ...options,
+    headers:{
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'application/json',
+      ...(options.headers||{})
+    }
+  });
+  if(res.status === 401){
+    // Token abgelaufen -> erneut stillschweigend anfragen und Aufruf wiederholen
+    await new Promise((resolve) => {
+      tokenClient.callback = (resp) => { accessToken = resp.access_token; resolve(); };
+      tokenClient.requestAccessToken({ prompt: '' });
+    });
+    return apiFetch(url, options);
+  }
+  if(!res.ok){ throw new Error('Google Calendar API Fehler: ' + res.status); }
+  return res.status === 204 ? null : res.json();
+}
+
+function fetchEvents(info, successCallback, failureCallback){
+  const url = API_BASE + '?singleEvents=true&orderBy=startTime'
+    + '&timeMin=' + encodeURIComponent(info.startStr)
+    + '&timeMax=' + encodeURIComponent(info.endStr);
+  apiFetch(url)
+    .then(data => {
+      const events = (data.items || []).map(ev => ({
+        id: ev.id,
+        title: ev.summary || '(ohne Titel)',
+        start: ev.start.dateTime || ev.start.date,
+        end: ev.end.dateTime || ev.end.date,
+        allDay: !ev.start.dateTime,
+        backgroundColor: GOOGLE_COLORS[ev.colorId] || 'var(--pine)',
+        extendedProps: { location: ev.location || '' }
+      }));
+      successCallback(events);
+    })
+    .catch(failureCallback);
+}
+
+function toGoogleTime(dateStr, allDay){
+  return allDay ? { date: dateStr.slice(0,10) } : { dateTime: new Date(dateStr).toISOString() };
+}
+
+async function saveEvent(payload, eventId){
+  const body = JSON.stringify(payload);
+  if(eventId){
+    await apiFetch(API_BASE + '/' + eventId, { method:'PATCH', body });
+  } else {
+    await apiFetch(API_BASE, { method:'POST', body });
+  }
+  calendar.refetchEvents();
+}
+
+async function deleteEvent(eventId){
+  await apiFetch(API_BASE + '/' + eventId, { method:'DELETE' });
+  calendar.refetchEvents();
+}
+
+/* ==================================================================
+   FullCalendar
+   ================================================================== */
+function initCalendar(){
+  const el = document.getElementById('calendar');
+  calendar = new FullCalendar.Calendar(el, {
+    locale: 'de',
+    initialView: 'timeGridWeek',
+    headerToolbar: false,
+    height: 'auto',
+    firstDay: 1,
+    slotMinTime: '06:00:00',
+    slotMaxTime: '22:00:00',
+    nowIndicator: true,
+    selectable: true,
+    editable: false,
+    events: fetchEvents,
+    datesSet: (info) => { document.getElementById('titleLabel').textContent = info.view.title; },
+    select: (info) => openDialog({ start: info.startStr, end: info.endStr, allDay: info.allDay }),
+    dateClick: (info) => openDialog({ start: info.dateStr, end: info.dateStr, allDay: info.allDay }),
+    eventClick: (info) => openDialog({
+      id: info.event.id,
+      title: info.event.title,
+      start: info.event.startStr,
+      end: info.event.endStr,
+      allDay: info.event.allDay,
+      location: info.event.extendedProps.location
+    })
+  });
+  calendar.render();
+
+  document.getElementById('prevBtn').addEventListener('click', () => calendar.prev());
+  document.getElementById('nextBtn').addEventListener('click', () => calendar.next());
+  document.getElementById('todayBtn').addEventListener('click', () => calendar.today());
+  document.getElementById('viewMonth').addEventListener('click', () => setView('dayGridMonth'));
+  document.getElementById('viewWeek').addEventListener('click', () => setView('timeGridWeek'));
+  setView('timeGridWeek');
+}
+
+function setView(name){
+  calendar.changeView(name);
+  document.getElementById('viewMonth').classList.toggle('active', name === 'dayGridMonth');
+  document.getElementById('viewWeek').classList.toggle('active', name === 'timeGridWeek');
+}
+
+/* ==================================================================
+   Termin-Dialog
+   ================================================================== */
+const dialog = document.getElementById('eventDialog');
+
+function toLocalInputValue(dateStr, allDay){
+  const d = new Date(dateStr);
+  if(allDay){
+    return dateStr.slice(0,10) + 'T09:00';
+  }
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function openDialog(data){
+  editingEventId = data.id || null;
+  document.getElementById('dialogTitle').textContent = editingEventId ? 'Termin bearbeiten' : 'Neuer Termin';
+  document.getElementById('f_title').value = data.title || '';
+  document.getElementById('f_allday').checked = !!data.allDay;
+  document.getElementById('f_location').value = data.location || '';
+  document.getElementById('f_start').value = toLocalInputValue(data.start, data.allDay);
+  document.getElementById('f_end').value = toLocalInputValue(data.end || data.start, data.allDay);
+  document.getElementById('deleteBtn').style.display = editingEventId ? 'inline-block' : 'none';
+  dialog.showModal();
+}
+
+document.getElementById('cancelBtn').addEventListener('click', () => dialog.close());
+
+document.getElementById('eventForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const allDay = document.getElementById('f_allday').checked;
+  const payload = {
+    summary: document.getElementById('f_title').value,
+    location: document.getElementById('f_location').value || undefined,
+    start: toGoogleTime(document.getElementById('f_start').value, allDay),
+    end: toGoogleTime(document.getElementById('f_end').value, allDay)
+  };
+  await saveEvent(payload, editingEventId);
+  dialog.close();
+});
+
+document.getElementById('deleteBtn').addEventListener('click', async () => {
+  if(editingEventId && confirm('Diesen Termin wirklich löschen?')){
+    await deleteEvent(editingEventId);
+    dialog.close();
+  }
+});
+
+document.getElementById('fab').addEventListener('click', () => {
+  if(activeTab === 'todos'){
+    openTodoDialog(null);
+    return;
+  }
+  const now = new Date();
+  const later = new Date(now.getTime() + 60*60*1000);
+  openDialog({ start: now.toISOString(), end: later.toISOString(), allDay: false });
+});
+
+window.addEventListener('load', () => {
+  // Google Identity Services braucht evtl. einen Moment zum Laden
+  const check = setInterval(() => {
+    if(window.google && google.accounts){
+      clearInterval(check);
+      initGoogle();
+    }
+  }, 100);
+});
+/* ==================================================================
+   Todo-Listen pro Familienmitglied – über die Google Tasks API
+   Jedes Familienmitglied bekommt eine eigene Google-Tasks-Liste.
+   Beim Anlegen einer Aufgabe wird für JEDEN passenden Wochentag im
+   gewählten Zeitraum eine EINZELNE Google-Task erstellt (eigenes
+   Fälligkeitsdatum, eigener Erledigt-Status). So ist jeder Tag
+   getrennt abhakbar und auf jedem Gerät mit demselben Google-Konto
+   sichtbar. Zusammengehörige Tasks tragen in den Notizen eine
+   versteckte Serien-Kennung (#serie_...), damit "Verwalten" sie als
+   eine Aufgabe gruppieren kann.
+   ================================================================== */
+const TASKS_API = 'https://tasks.googleapis.com/tasks/v1';
+const SERIES_TAG = /#serie_(\d+)/;
+
+let activeTab = 'calendar';
+let todoViewMode = 'day';
+let todoCurrentDate = new Date();
+let editingSeriesId = null;
+let selectedWeekdays = new Set();
+let taskLists = {};        // memberId -> tasklist ID
+let taskListsReady = false;
+
+function dateStr(d){
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function mondayOf(d){
+  const copy = new Date(d);
+  const day = (copy.getDay() + 6) % 7; // Montag = 0
+  copy.setDate(copy.getDate() - day);
+  return copy;
+}
+function addDays(d, n){ const c = new Date(d); c.setDate(c.getDate()+n); return c; }
+function memberById(id){ return CONFIG.FAMILY_MEMBERS.find(m => m.id === id); }
+function rfc3339(ds){ return ds + 'T00:00:00.000Z'; }
+const WEEKDAY_LABELS = { 0:'So', 1:'Mo', 2:'Di', 3:'Mi', 4:'Do', 5:'Fr', 6:'Sa' };
+
+/* ---------- Tasklisten pro Familienmitglied anlegen/finden ---------- */
+async function ensureTaskLists(){
+  const existing = await apiFetch(TASKS_API + '/users/@me/lists?maxResults=100');
+  const lists = existing.items || [];
+
+  for(const member of CONFIG.FAMILY_MEMBERS){
+    const wantedTitle = 'Familienkalender: ' + member.name;
+    let found = lists.find(l => l.title === wantedTitle);
+    if(!found){
+      found = await apiFetch(TASKS_API + '/users/@me/lists', {
+        method: 'POST',
+        body: JSON.stringify({ title: wantedTitle })
+      });
+      lists.push(found);
+    }
+    taskLists[member.id] = found.id;
+  }
+  taskListsReady = true;
+  if(activeTab === 'todos'){ renderTodoView(); }
+}
+
+/* ---------- Tasks lesen ---------- */
+async function fetchTasksInRange(memberId, fromDs, toDs){
+  const listId = taskLists[memberId];
+  if(!listId) return [];
+  const url = TASKS_API + '/lists/' + listId + '/tasks'
+    + '?showCompleted=true&showHidden=true&maxResults=100'
+    + '&dueMin=' + encodeURIComponent(rfc3339(fromDs))
+    + '&dueMax=' + encodeURIComponent(rfc3339(toDs));
+  const data = await apiFetch(url);
+  return data.items || [];
+}
+
+// Holt ALLE Tasks einer Liste (mit Paginierung) – für die Verwalten-Ansicht.
+async function fetchAllTasks(memberId){
+  const listId = taskLists[memberId];
+  if(!listId) return [];
+  let items = [];
+  let pageToken = '';
+  do{
+    const url = TASKS_API + '/lists/' + listId + '/tasks?showCompleted=true&showHidden=true&maxResults=100'
+      + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    const data = await apiFetch(url);
+    items = items.concat(data.items || []);
+    pageToken = data.nextPageToken || '';
+  } while(pageToken);
+  return items;
+}
+
+async function toggleTask(memberId, task){
+  const listId = taskLists[memberId];
+  const newStatus = task.status === 'completed' ? 'needsAction' : 'completed';
+  await apiFetch(TASKS_API + '/lists/' + listId + '/tasks/' + task.id, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: newStatus })
+  });
+  renderTodoView();
+}
+
+async function deleteTask(memberId, taskId){
+  const listId = taskLists[memberId];
+  await apiFetch(TASKS_API + '/lists/' + listId + '/tasks/' + taskId, { method: 'DELETE' });
+}
+
+/* ---------- Tab-Umschaltung ---------- */
+document.getElementById('tabCalendar').addEventListener('click', () => switchTab('calendar'));
+document.getElementById('tabTodos').addEventListener('click', () => switchTab('todos'));
+
+function switchTab(tab){
+  activeTab = tab;
+  document.getElementById('tabCalendar').classList.toggle('active', tab === 'calendar');
+  document.getElementById('tabTodos').classList.toggle('active', tab === 'todos');
+  document.getElementById('calendarView').hidden = tab !== 'calendar';
+  document.getElementById('todoView').hidden = tab !== 'todos';
+  document.getElementById('fab').title = tab === 'calendar' ? 'Neuer Termin' : 'Neue Aufgabe';
+  if(tab === 'todos' && taskListsReady){ renderTodoView(); }
+}
+
+/* ---------- Tages-/Wochenumschaltung + Navigation ---------- */
+document.getElementById('todoDayBtn').addEventListener('click', () => setTodoViewMode('day'));
+document.getElementById('todoWeekBtn').addEventListener('click', () => setTodoViewMode('week'));
+document.getElementById('todoPrev').addEventListener('click', () => shiftTodoDate(-1));
+document.getElementById('todoNext').addEventListener('click', () => shiftTodoDate(1));
+document.getElementById('todoToday').addEventListener('click', () => { todoCurrentDate = new Date(); renderTodoView(); });
+
+function setTodoViewMode(mode){
+  todoViewMode = mode;
+  document.getElementById('todoDayBtn').classList.toggle('active', mode === 'day');
+  document.getElementById('todoWeekBtn').classList.toggle('active', mode === 'week');
+  document.getElementById('todoDayGrid').hidden = mode !== 'day';
+  document.getElementById('todoWeekGrid').hidden = mode !== 'week';
+  renderTodoView();
+}
+function shiftTodoDate(dir){
+  todoCurrentDate = addDays(todoCurrentDate, todoViewMode === 'day' ? dir : dir * 7);
+  renderTodoView();
+}
+
+function renderTodoView(){
+  if(!taskListsReady) return;
+  if(todoViewMode === 'day'){ renderTodoDay(); } else { renderTodoWeek(); }
+}
+
+/* ---------- Tagesansicht ---------- */
+async function renderTodoDay(){
+  const ds = dateStr(todoCurrentDate);
+  document.getElementById('todoDateLabel').textContent =
+    todoCurrentDate.toLocaleDateString('de-AT', { weekday:'long', day:'numeric', month:'long' });
+
+  const grid = document.getElementById('todoDayGrid');
+  grid.innerHTML = '';
+
+  for(const member of CONFIG.FAMILY_MEMBERS){
+    const col = document.createElement('div');
+    col.className = 'todo-member-col';
+    const head = document.createElement('div');
+    head.className = 'todo-member-head';
+    head.innerHTML = `<span class="todo-dot" style="background:${member.color}"></span><h3>${member.name}</h3>`;
+    col.appendChild(head);
+    grid.appendChild(col);
+
+    const tasks = await fetchTasksInRange(member.id, ds, ds);
+    if(tasks.length === 0){
+      const empty = document.createElement('div');
+      empty.className = 'todo-empty';
+      empty.textContent = 'Keine Aufgaben';
+      col.appendChild(empty);
+    }
+    tasks.forEach(task => col.appendChild(buildTodoRow(member, task)));
+  }
+}
+
+function buildTodoRow(member, task){
+  const done = task.status === 'completed';
+
+  const row = document.createElement('div');
+  row.className = 'todo-item' + (done ? ' done' : '');
+
+  const check = document.createElement('div');
+  check.className = 'todo-check';
+  check.textContent = done ? '✓' : '';
+
+  const label = document.createElement('div');
+  label.className = 'todo-label';
+  label.textContent = task.title;
+
+  const edit = document.createElement('button');
+  edit.className = 'todo-edit';
+  edit.type = 'button';
+  edit.textContent = '✎';
+  edit.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const m = SERIES_TAG.exec(task.notes || '');
+    if(m){ openManageForSeries(member.id, 'serie_' + m[1]); }
+  });
+
+  row.appendChild(check);
+  row.appendChild(label);
+  row.appendChild(edit);
+  row.addEventListener('click', () => toggleTask(member.id, task));
+  return row;
+}
+
+/* ---------- Wochenansicht ---------- */
+async function renderTodoWeek(){
+  const monday = mondayOf(todoCurrentDate);
+  const days = Array.from({length:7}, (_, i) => addDays(monday, i));
+  document.getElementById('todoDateLabel').textContent =
+    'KW ' + getWeekNumber(monday) + ' · ' + monday.toLocaleDateString('de-AT') + ' – ' + days[6].toLocaleDateString('de-AT');
+
+  const grid = document.getElementById('todoWeekGrid');
+  const table = document.createElement('table');
+  table.className = 'todo-week-table';
+
+  const thead = document.createElement('tr');
+  thead.innerHTML = '<th>Familienmitglied</th>' + days.map(d =>
+    `<th>${d.toLocaleDateString('de-AT',{weekday:'short'})}<br>${d.getDate()}.${d.getMonth()+1}.</th>`
+  ).join('');
+  table.appendChild(thead);
+
+  const fromDs = dateStr(days[0]);
+  const toDs = dateStr(days[6]);
+
+  for(const member of CONFIG.FAMILY_MEMBERS){
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.innerHTML = `<span class="todo-dot" style="background:${member.color}; display:inline-block; margin-right:0.4rem;"></span>${member.name}`;
+    tr.appendChild(nameTd);
+
+    const weekTasks = await fetchTasksInRange(member.id, fromDs, toDs);
+
+    days.forEach(d => {
+      const ds = dateStr(d);
+      const td = document.createElement('td');
+      const tasksForDay = weekTasks.filter(t => (t.due || '').slice(0,10) === ds);
+      tasksForDay.forEach(task => {
+        const done = task.status === 'completed';
+        const chip = document.createElement('div');
+        chip.className = 'todo-chip' + (done ? ' done' : '');
+        chip.innerHTML = `<span class="todo-check">${done ? '✓' : ''}</span><span class="todo-label">${task.title}</span>`;
+        chip.addEventListener('click', () => toggleTask(member.id, task));
+        td.appendChild(chip);
+      });
+      tr.appendChild(td);
+    });
+    table.appendChild(tr);
+  }
+
+  grid.innerHTML = '';
+  grid.appendChild(table);
+}
+
+function getWeekNumber(d){
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(),0,4));
+  return 1 + Math.round(((date - firstThursday) / 86400000 - 3 + (firstThursday.getUTCDay()+6)%7) / 7);
+}
+
+/* ---------- Todo-Dialog (Serie anlegen/bearbeiten) ---------- */
+const todoDialog = document.getElementById('todoDialog');
+let editingSeriesMemberId = null;
+
+function populateMemberSelect(){
+  const select = document.getElementById('t_member');
+  select.innerHTML = CONFIG.FAMILY_MEMBERS.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+}
+
+document.getElementById('weekdayPicker').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-day]');
+  if(!btn) return;
+  const day = Number(btn.dataset.day);
+  if(selectedWeekdays.has(day)){ selectedWeekdays.delete(day); btn.classList.remove('active'); }
+  else { selectedWeekdays.add(day); btn.classList.add('active'); }
+});
+
+function openTodoDialog(prefill){
+  editingSeriesId = prefill && prefill.seriesId ? prefill.seriesId : null;
+  editingSeriesMemberId = prefill && prefill.memberId ? prefill.memberId : null;
+  populateMemberSelect();
+  selectedWeekdays.clear();
+  document.querySelectorAll('#weekdayPicker button').forEach(b => b.classList.remove('active'));
+
+  if(prefill && prefill.seriesId){
+    document.getElementById('todoDialogTitle').textContent = 'Aufgabe bearbeiten';
+    document.getElementById('t_title').value = prefill.title;
+    document.getElementById('t_member').value = prefill.memberId;
+    document.getElementById('t_start').value = prefill.start;
+    document.getElementById('t_end').value = prefill.end;
+    prefill.weekdays.forEach(day => {
+      selectedWeekdays.add(day);
+      const b = document.querySelector(`#weekdayPicker button[data-day="${day}"]`);
+      if(b) b.classList.add('active');
+    });
+    document.getElementById('todoDeleteBtn').style.display = 'inline-block';
+  } else {
+    document.getElementById('todoDialogTitle').textContent = 'Neue Aufgabe';
+    document.getElementById('t_title').value = '';
+    const ds = dateStr(todoCurrentDate);
+    document.getElementById('t_start').value = ds;
+    document.getElementById('t_end').value = ds;
+    document.getElementById('todoDeleteBtn').style.display = 'none';
+  }
+  todoDialog.showModal();
+}
+
+document.getElementById('todoCancelBtn').addEventListener('click', () => todoDialog.close());
+
+document.getElementById('todoForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if(selectedWeekdays.size === 0){ alert('Bitte mindestens einen Wochentag auswählen.'); return; }
+
+  const title = document.getElementById('t_title').value;
+  const memberId = document.getElementById('t_member').value;
+  const start = document.getElementById('t_start').value;
+  const end = document.getElementById('t_end').value;
+  const weekdays = Array.from(selectedWeekdays);
+
+  const submitBtn = document.querySelector('#todoForm button[type=submit]');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Wird angelegt …';
+
+  if(editingSeriesId){
+    // Bearbeiten = alte Serie löschen, neu anlegen (setzt den Erledigt-Status zurück)
+    await deleteSeriesTasks(editingSeriesMemberId, editingSeriesId);
+  }
+  await createSeries(memberId, title, weekdays, start, end);
+
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Speichern';
+  todoDialog.close();
+  renderTodoView();
+});
+
+async function createSeries(memberId, title, weekdays, start, end){
+  const seriesId = 'serie_' + Date.now();
+  const dates = [];
+  let cursor = new Date(start + 'T00:00:00');
+  const endDate = new Date(end + 'T00:00:00');
+  while(cursor <= endDate){
+    if(weekdays.includes(cursor.getDay())){ dates.push(dateStr(cursor)); }
+    cursor = addDays(cursor, 1);
+  }
+  const listId = taskLists[memberId];
+
+  // In kleinen Gruppen parallel anlegen, um die API nicht zu überlasten
+  const chunkSize = 8;
+  for(let i = 0; i < dates.length; i += chunkSize){
+    const chunk = dates.slice(i, i + chunkSize);
+    await Promise.all(chunk.map(ds => apiFetch(TASKS_API + '/lists/' + listId + '/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title, due: rfc3339(ds), notes: '#' + seriesId })
+    })));
+  }
+}
+
+async function deleteSeriesTasks(memberId, seriesId){
+  const all = await fetchAllTasks(memberId);
+  const match = all.filter(t => (t.notes || '').includes('#' + seriesId));
+  for(const t of match){ await deleteTask(memberId, t.id); }
+}
+
+document.getElementById('todoDeleteBtn').addEventListener('click', async () => {
+  if(editingSeriesId && confirm('Diese Aufgabe (alle Tage) wirklich löschen?')){
+    await deleteSeriesTasks(editingSeriesMemberId, editingSeriesId);
+    todoDialog.close();
+    renderTodoView();
+  }
+});
+
+/* ---------- Verwalten-Dialog: fasst Tasks derselben Serie zusammen ---------- */
+const manageDialog = document.getElementById('manageDialog');
+
+async function buildSeriesGroups(){
+  const groups = []; // {seriesId, memberId, title, dates:[], weekdaySet:Set}
+  for(const member of CONFIG.FAMILY_MEMBERS){
+    const tasks = await fetchAllTasks(member.id);
+    const byId = {};
+    tasks.forEach(t => {
+      const m = SERIES_TAG.exec(t.notes || '');
+      if(!m) return;
+      const sid = 'serie_' + m[1];
+      byId[sid] = byId[sid] || { seriesId: sid, memberId: member.id, title: t.title, dates: [] };
+      if(t.due) byId[sid].dates.push(t.due.slice(0,10));
+    });
+    groups.push(...Object.values(byId));
+  }
+  return groups;
+}
+
+function openManageForSeries(memberId, seriesId){
+  document.getElementById('manageTodosBtn').click();
+  // Nach dem Rendern die passende Zeile direkt öffnen
+  setTimeout(() => {
+    const row = document.querySelector(`.manage-row[data-series="${seriesId}"]`);
+    if(row) row.querySelector('.info').click();
+  }, 50);
+}
+
+document.getElementById('manageTodosBtn').addEventListener('click', async () => {
+  const list = document.getElementById('manageList');
+  list.innerHTML = '<div class="todo-empty">Lädt …</div>';
+  manageDialog.showModal();
+
+  const groups = await buildSeriesGroups();
+  list.innerHTML = '';
+  if(groups.length === 0){
+    list.innerHTML = '<div class="todo-empty">Noch keine Aufgaben angelegt.</div>';
+    return;
+  }
+
+  groups.forEach(g => {
+    const member = memberById(g.memberId);
+    const sortedDates = g.dates.slice().sort();
+    const start = sortedDates[0];
+    const end = sortedDates[sortedDates.length - 1];
+    const weekdaySet = new Set(sortedDates.map(ds => new Date(ds + 'T00:00:00').getDay()));
+    const days = Array.from(weekdaySet).sort().map(d => WEEKDAY_LABELS[d]).join(', ');
+
+    const row = document.createElement('div');
+    row.className = 'manage-row';
+    row.dataset.series = g.seriesId;
+    row.innerHTML = `
+      <div class="info">
+        <strong>${g.title} <span style="color:${member ? member.color : '#999'}">●</span> ${member ? member.name : ''}</strong>
+        <span>${days} · ${start} bis ${end} · ${sortedDates.length} Termine</span>
+      </div>
+      <button type="button" title="Löschen">×</button>`;
+    row.querySelector('.info').addEventListener('click', () => {
+      manageDialog.close();
+      openTodoDialog({
+        seriesId: g.seriesId,
+        memberId: g.memberId,
+        title: g.title,
+        start, end,
+        weekdays: Array.from(weekdaySet)
+      });
+    });
+    row.querySelector('button').addEventListener('click', async () => {
+      if(confirm('Diese Aufgabe (alle Tage) wirklich löschen?')){
+        await deleteSeriesTasks(g.memberId, g.seriesId);
+        document.getElementById('manageTodosBtn').click();
+        renderTodoView();
+      }
+    });
+    list.appendChild(row);
+  });
+});
+document.getElementById('manageCloseBtn').addEventListener('click', () => manageDialog.close());
+</script>
+</body>
+</html>

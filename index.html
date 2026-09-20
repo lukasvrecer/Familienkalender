@@ -23,12 +23,18 @@
     SCOPE: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/tasks",
 
     // Familienmitglieder für die Todo-Listen – Namen/Farben anpassen,
-    // Zeilen hinzufügen oder löschen nach Bedarf.
+    // Zeilen hinzufügen oder löschen nach Bedarf. colorId ist die
+    // Google-Kalender-Terminfarbe, die diesem Mitglied gehört (siehe
+    // Legende unten) – damit die "Heute"-Ansicht weiß, in welche Spalte
+    // ein Termin aus dem gemeinsamen Kalender gehört. In Google Kalender
+    // beim Termin einfach die passende Farbe auswählen.
+    // 1 Lavendel 2 Salbei 3 Traube 4 Flamingo 5 Banane
+    // 6 Mandarine 7 Pfau 8 Graphit 9 Heidelbeere 10 Basilikum 11 Tomate
     FAMILY_MEMBERS: [
-      { id: "lukas",  name: "Lukas",  color: "#4C6B8A" },
-      { id: "chrisi", name: "Chrisi", color: "#7A5980" },
-      { id: "leonie", name: "Leonie", color: "#D9A441" },
-      { id: "tobias", name: "Tobias", color: "#4E8C6E" }
+      { id: "lukas",  name: "Lukas",  color: "#4C6B8A", colorId: 9 },
+      { id: "chrisi", name: "Chrisi", color: "#7A5980", colorId: 3 },
+      { id: "leonie", name: "Leonie", color: "#D9A441", colorId: 5 },
+      { id: "tobias", name: "Tobias", color: "#4E8C6E", colorId: 10 }
     ]
   };
 </script>
@@ -212,6 +218,36 @@
   .manage-row .info span{ display:block; font-size:0.8rem; color:var(--ink-soft); }
   .manage-row button{ border:none; background:none; color:var(--coral); font-size:1.2rem; cursor:pointer; }
   #manageCloseBtn{ align-self:flex-end; font-family:var(--font-body); font-weight:600; border:1px solid var(--line); background:#fff; border-radius:10px; padding:0.5rem 1rem; cursor:pointer; }
+
+  /* ---------- "Heute"-Ansicht: Kalender + Todos kombiniert ---------- */
+  .today-layout{ display:flex; gap:1rem; align-items:flex-start; }
+  .today-grid-wrap{ flex:1 1 68%; min-width:0; }
+  .today-todo-panel{ flex:1 1 28%; min-width:230px; display:flex; flex-direction:column; gap:0.9rem; }
+
+  .today-grid{ display:flex; gap:1rem; }
+  .today-day-block{ flex:1; min-width:0; background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:0.75rem; }
+  .today-day-title{ font-family:var(--font-display); font-weight:600; font-size:1.1rem; margin:0 0 0.5rem 0.2rem; }
+
+  .today-members-head{ display:flex; margin-left:3rem; margin-bottom:0.3rem; }
+  .today-members-head span{ flex:1; text-align:center; font-size:0.78rem; font-weight:600; color:var(--ink-soft); display:flex; align-items:center; justify-content:center; gap:0.3rem; }
+
+  .today-banners{ margin-left:3rem; display:flex; flex-direction:column; gap:0.25rem; margin-bottom:0.4rem; }
+  .today-banner{ border-radius:6px; padding:0.25rem 0.5rem; font-size:0.8rem; font-weight:500; color:#fff; cursor:pointer; }
+
+  .today-scroll{ max-height:60vh; overflow-y:auto; }
+  .today-timerow{ display:flex; position:relative; }
+  .today-time-axis{ width:3rem; flex:none; position:relative; }
+  .today-time-axis span{ position:absolute; right:0.4rem; transform:translateY(-50%); font-size:0.72rem; color:var(--ink-soft); }
+  .today-columns{ flex:1; display:flex; position:relative; background-image:repeating-linear-gradient(to bottom, var(--line) 0, var(--line) 1px, transparent 1px, transparent var(--hour-h)); }
+  .today-col{ flex:1; position:relative; border-right:1px solid var(--line); }
+  .today-col:last-child{ border-right:none; }
+  .today-now-line{ position:absolute; left:0; right:0; height:2px; background:var(--coral); z-index:5; }
+  .today-block{
+    position:absolute; left:2px; right:2px; border-radius:6px; padding:2px 5px;
+    font-size:0.72rem; line-height:1.15; color:#fff; overflow:hidden; cursor:pointer;
+  }
+
+  .today-todo-panel .todo-member-col{ padding:0.85rem; }
 </style>
 </head>
 <body>
@@ -225,7 +261,7 @@
 
 <header>
   <h1 class="title" id="titleLabel">Familienkalender</h1>
-  <div class="nav">
+  <div class="nav" style="display:none;">
     <button id="prevBtn">‹</button>
     <button id="todayBtn">Heute</button>
     <button id="nextBtn">›</button>
@@ -235,12 +271,22 @@
 </header>
 
 <div class="tabbar">
-  <button id="tabCalendar" class="tab active">Kalender</button>
+  <button id="tabToday" class="tab active">Heute</button>
+  <button id="tabCalendar" class="tab">Kalender</button>
   <button id="tabTodos" class="tab">Todos</button>
 </div>
 
 <main>
-  <section id="calendarView">
+  <section id="todayView">
+    <div class="today-layout">
+      <div class="today-grid-wrap">
+        <div id="todayGrid" class="today-grid"></div>
+      </div>
+      <div class="today-todo-panel" id="todayTodoPanel"></div>
+    </div>
+  </section>
+
+  <section id="calendarView" hidden>
     <div id="calendar"></div>
   </section>
 
@@ -598,7 +644,7 @@ window.addEventListener('load', () => {
 const TASKS_API = 'https://tasks.googleapis.com/tasks/v1';
 const SERIES_TAG = /#serie_(\d+)/;
 
-let activeTab = 'calendar';
+let activeTab = 'today';
 let todoViewMode = 'day';
 let todoCurrentDate = new Date();
 let editingSeriesId = null;
@@ -640,6 +686,7 @@ async function ensureTaskLists(){
   }
   taskListsReady = true;
   if(activeTab === 'todos'){ renderTodoView(); }
+  if(activeTab === 'today'){ renderTodayView(); }
 }
 
 /* ---------- Tasks lesen ---------- */
@@ -686,17 +733,22 @@ async function deleteTask(memberId, taskId){
 }
 
 /* ---------- Tab-Umschaltung ---------- */
+document.getElementById('tabToday').addEventListener('click', () => switchTab('today'));
 document.getElementById('tabCalendar').addEventListener('click', () => switchTab('calendar'));
 document.getElementById('tabTodos').addEventListener('click', () => switchTab('todos'));
 
 function switchTab(tab){
   activeTab = tab;
+  document.getElementById('tabToday').classList.toggle('active', tab === 'today');
   document.getElementById('tabCalendar').classList.toggle('active', tab === 'calendar');
   document.getElementById('tabTodos').classList.toggle('active', tab === 'todos');
+  document.getElementById('todayView').hidden = tab !== 'today';
   document.getElementById('calendarView').hidden = tab !== 'calendar';
   document.getElementById('todoView').hidden = tab !== 'todos';
-  document.getElementById('fab').title = tab === 'calendar' ? 'Neuer Termin' : 'Neue Aufgabe';
+  document.querySelector('header .nav').style.display = tab === 'calendar' ? 'flex' : 'none';
+  document.getElementById('fab').title = tab === 'todos' ? 'Neue Aufgabe' : 'Neuer Termin';
   if(tab === 'todos' && taskListsReady){ renderTodoView(); }
+  if(tab === 'today' && taskListsReady){ renderTodayView(); }
 }
 
 /* ---------- Tages-/Wochenumschaltung + Navigation ---------- */
@@ -1031,6 +1083,185 @@ document.getElementById('manageTodosBtn').addEventListener('click', async () => 
   });
 });
 document.getElementById('manageCloseBtn').addEventListener('click', () => manageDialog.close());
+
+/* ==================================================================
+   "Heute"-Ansicht: Kalender (heute + morgen, je 4 Spalten – eine pro
+   Familienmitglied) plus die heutigen Todos rechts daneben.
+   Termine werden anhand ihrer Google-Kalenderfarbe (colorId) der
+   passenden Spalte zugeordnet (siehe CONFIG.FAMILY_MEMBERS). Termine
+   ohne passende Farbe erscheinen als Banner über allen 4 Spalten.
+   ================================================================== */
+const TODAY_START_HOUR = 7;
+const TODAY_END_HOUR = 21;
+let todayRefreshTimer = null;
+
+async function fetchRawEvents(fromDs, toDs){
+  const url = API_BASE + '?singleEvents=true&orderBy=startTime'
+    + '&timeMin=' + encodeURIComponent(fromDs + 'T00:00:00')
+    + '&timeMax=' + encodeURIComponent(toDs + 'T23:59:59');
+  const data = await apiFetch(url);
+  return data.items || [];
+}
+
+async function renderTodayView(){
+  const todayDate = new Date();
+  const tomorrowDate = addDays(todayDate, 1);
+  const fromDs = dateStr(todayDate);
+  const toDs = dateStr(tomorrowDate);
+
+  const events = await fetchRawEvents(fromDs, toDs);
+
+  const grid = document.getElementById('todayGrid');
+  grid.innerHTML = '';
+  grid.appendChild(buildTodayDayBlock('Heute', todayDate, events));
+  grid.appendChild(buildTodayDayBlock('Morgen', tomorrowDate, events));
+
+  await renderTodayTodoPanel(fromDs);
+
+  if(todayRefreshTimer){ clearInterval(todayRefreshTimer); }
+  todayRefreshTimer = setInterval(() => { if(activeTab === 'today'){ renderTodayView(); } }, 5 * 60 * 1000);
+}
+
+function buildTodayDayBlock(label, dayDate, allEvents){
+  const ds = dateStr(dayDate);
+  const hourHeight = 48;
+  const totalHours = TODAY_END_HOUR - TODAY_START_HOUR;
+
+  const block = document.createElement('div');
+  block.className = 'today-day-block';
+  block.style.setProperty('--hour-h', hourHeight + 'px');
+
+  const title = document.createElement('div');
+  title.className = 'today-day-title';
+  title.textContent = label + ' · ' + dayDate.toLocaleDateString('de-AT', { weekday:'short', day:'numeric', month:'long' });
+  block.appendChild(title);
+
+  const membersHead = document.createElement('div');
+  membersHead.className = 'today-members-head';
+  membersHead.innerHTML = CONFIG.FAMILY_MEMBERS.map(m =>
+    `<span><span class="todo-dot" style="background:${m.color}"></span>${m.name}</span>`
+  ).join('');
+  block.appendChild(membersHead);
+
+  // Termine dieses Tages, aufgeteilt nach Farbe/Mitglied bzw. "nicht zuordenbar"
+  const dayEvents = allEvents.filter(ev => {
+    const evDs = (ev.start.dateTime || ev.start.date).slice(0,10);
+    return evDs === ds;
+  });
+  const banners = [];
+  const byMember = {};
+  CONFIG.FAMILY_MEMBERS.forEach(m => byMember[m.id] = []);
+
+  dayEvents.forEach(ev => {
+    const member = CONFIG.FAMILY_MEMBERS.find(m => String(m.colorId) === String(ev.colorId));
+    if(!ev.start.dateTime || !member){ banners.push(ev); }
+    else { byMember[member.id].push(ev); }
+  });
+
+  if(banners.length){
+    const bannerWrap = document.createElement('div');
+    bannerWrap.className = 'today-banners';
+    banners.forEach(ev => {
+      const chip = document.createElement('div');
+      chip.className = 'today-banner';
+      chip.style.background = GOOGLE_COLORS[ev.colorId] || 'var(--pine)';
+      chip.textContent = ev.summary || '(ohne Titel)';
+      chip.addEventListener('click', () => openDialog(eventToDialogData(ev)));
+      bannerWrap.appendChild(chip);
+    });
+    block.appendChild(bannerWrap);
+  }
+
+  const scroll = document.createElement('div');
+  scroll.className = 'today-scroll';
+  const row = document.createElement('div');
+  row.className = 'today-timerow';
+  row.style.height = (totalHours * hourHeight) + 'px';
+
+  const axis = document.createElement('div');
+  axis.className = 'today-time-axis';
+  for(let h = TODAY_START_HOUR; h <= TODAY_END_HOUR; h++){
+    const lbl = document.createElement('span');
+    lbl.style.top = ((h - TODAY_START_HOUR) * hourHeight) + 'px';
+    lbl.textContent = String(h).padStart(2,'0') + ':00';
+    axis.appendChild(lbl);
+  }
+  row.appendChild(axis);
+
+  const cols = document.createElement('div');
+  cols.className = 'today-columns';
+
+  CONFIG.FAMILY_MEMBERS.forEach(member => {
+    const col = document.createElement('div');
+    col.className = 'today-col';
+    byMember[member.id].forEach(ev => {
+      const b = positionedBlock(ev, member.color, hourHeight);
+      if(b) col.appendChild(b);
+    });
+    cols.appendChild(col);
+  });
+
+  // "Jetzt"-Linie nur für den heutigen Tag
+  if(ds === dateStr(new Date())){
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes() - TODAY_START_HOUR * 60;
+    if(nowMinutes >= 0 && nowMinutes <= totalHours * 60){
+      const line = document.createElement('div');
+      line.className = 'today-now-line';
+      line.style.top = (nowMinutes / 60 * hourHeight) + 'px';
+      cols.appendChild(line);
+    }
+  }
+
+  row.appendChild(cols);
+  scroll.appendChild(row);
+  block.appendChild(scroll);
+  return block;
+}
+
+function positionedBlock(ev, color, hourHeight){
+  const start = new Date(ev.start.dateTime);
+  const end = new Date(ev.end.dateTime);
+  const startMin = Math.max(0, start.getHours()*60 + start.getMinutes() - TODAY_START_HOUR*60);
+  const endMin = Math.min((TODAY_END_HOUR - TODAY_START_HOUR)*60, end.getHours()*60 + end.getMinutes() - TODAY_START_HOUR*60);
+  if(endMin <= 0 || startMin >= (TODAY_END_HOUR - TODAY_START_HOUR)*60) return null;
+
+  const div = document.createElement('div');
+  div.className = 'today-block';
+  div.style.top = (startMin / 60 * hourHeight) + 'px';
+  div.style.height = Math.max(18, (endMin - startMin) / 60 * hourHeight) + 'px';
+  div.style.background = color;
+  div.textContent = ev.summary || '(ohne Titel)';
+  div.addEventListener('click', () => openDialog(eventToDialogData(ev)));
+  return div;
+}
+
+function eventToDialogData(ev){
+  return {
+    id: ev.id,
+    title: ev.summary || '',
+    start: ev.start.dateTime || ev.start.date,
+    end: ev.end.dateTime || ev.end.date,
+    allDay: !ev.start.dateTime,
+    location: ev.location || ''
+  };
+}
+
+async function renderTodayTodoPanel(ds){
+  const panel = document.getElementById('todayTodoPanel');
+  panel.innerHTML = '';
+  for(const member of CONFIG.FAMILY_MEMBERS){
+    const col = document.createElement('div');
+    col.className = 'todo-member-col';
+    col.innerHTML = `<div class="todo-member-head"><span class="todo-dot" style="background:${member.color}"></span><h3>${member.name}</h3></div>`;
+    const tasks = await fetchTasksInRange(member.id, ds, ds);
+    if(tasks.length === 0){
+      col.innerHTML += '<div class="todo-empty">Keine Aufgaben</div>';
+    }
+    tasks.forEach(task => col.appendChild(buildTodoRow(member, task)));
+    panel.appendChild(col);
+  }
+}
 </script>
 </body>
 </html>

@@ -248,6 +248,21 @@
   }
 
   .today-todo-panel .todo-member-col{ padding:0.85rem; }
+
+  /* ---------- Todo-Tageszeit-Abschnitte ---------- */
+  .todo-segment-heading{
+    font-family:var(--font-body); font-size:0.72rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.04em; color:var(--ink-soft); margin:0.7rem 0 0.2rem;
+  }
+  .todo-segment-toggle{
+    display:flex; align-items:center; justify-content:space-between; width:100%;
+    font-family:var(--font-body); font-weight:600; font-size:0.85rem;
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:8px; padding:0.55rem 0.7rem; margin:0.45rem 0 0; cursor:pointer;
+  }
+  .todo-segment-toggle.warn{ background:var(--coral); color:#fff; border-color:var(--coral); }
+  .todo-segment-list{ margin-top:0.1rem; }
+  .todo-segment-list.collapsed{ display:none; }
 </style>
 </head>
 <body>
@@ -363,6 +378,15 @@
     <div>
       <label for="t_member">Für</label>
       <select id="t_member"></select>
+    </div>
+
+    <div>
+      <label>Wann</label>
+      <div class="weekday-picker" id="segmentPicker">
+        <button type="button" data-segment="frueh">Früh</button>
+        <button type="button" data-segment="nachmittag">Nachmittag</button>
+        <button type="button" data-segment="abend">Abend</button>
+      </div>
     </div>
 
     <div>
@@ -643,6 +667,32 @@ window.addEventListener('load', () => {
    ================================================================== */
 const TASKS_API = 'https://tasks.googleapis.com/tasks/v1';
 const SERIES_TAG = /#serie_(\d+)/;
+const SEGMENT_TAG = /#zeit_(\w+)/;
+const DAY_SEGMENTS = [
+  { key: 'frueh',      label: 'Früh',       startHour: 6,  endHour: 11 },
+  { key: 'nachmittag', label: 'Nachmittag', startHour: 11, endHour: 17 },
+  { key: 'abend',      label: 'Abend',      startHour: 17, endHour: 22 }
+];
+
+function taskSegment(task){
+  const m = SEGMENT_TAG.exec(task.notes || '');
+  return m ? m[1] : null;
+}
+function currentSegmentKey(){
+  const h = new Date().getHours() + new Date().getMinutes()/60;
+  const seg = DAY_SEGMENTS.find(s => h >= s.startHour && h < s.endHour);
+  return seg ? seg.key : (h < DAY_SEGMENTS[0].startHour ? 'frueh' : 'abend');
+}
+// Status eines Abschnitts an einem bestimmten Tag: 'past' | 'current' | 'future'
+function segmentStatus(seg, viewDs){
+  const todayDs = dateStr(new Date());
+  if(viewDs < todayDs) return 'past';
+  if(viewDs > todayDs) return 'future';
+  const h = new Date().getHours() + new Date().getMinutes()/60;
+  if(h < seg.startHour) return 'future';
+  if(h >= seg.endHour) return 'past';
+  return 'current';
+}
 
 let activeTab = 'today';
 let todoViewMode = 'day';
@@ -663,7 +713,66 @@ function mondayOf(d){
   return copy;
 }
 function addDays(d, n){ const c = new Date(d); c.setDate(c.getDate()+n); return c; }
+function groupBySegment(tasks){
+  const groups = { frueh: [], nachmittag: [], abend: [], unbekannt: [] };
+  tasks.forEach(t => {
+    const seg = taskSegment(t);
+    (seg && groups[seg]) ? groups[seg].push(t) : groups.unbekannt.push(t);
+  });
+  return groups;
+}
+
 function memberById(id){ return CONFIG.FAMILY_MEMBERS.find(m => m.id === id); }
+
+// Rendert die Aufgaben eines Familienmitglieds für einen Tag (ds), unterteilt
+// nach Früh/Nachmittag/Abend, in die übergebene Spalte (col).
+function appendMemberTodos(col, member, tasks, ds){
+  if(tasks.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'todo-empty';
+    empty.textContent = 'Keine Aufgaben';
+    col.appendChild(empty);
+    return;
+  }
+
+  const groups = groupBySegment(tasks);
+
+  // Aufgaben ohne Zeitangabe (z.B. vor dieser Funktion angelegt) immer zeigen,
+  // damit nichts versehentlich verschwindet.
+  groups.unbekannt.forEach(task => col.appendChild(buildTodoRow(member, task)));
+
+  DAY_SEGMENTS.forEach(seg => {
+    const segTasks = groups[seg.key];
+    if(segTasks.length === 0) return;
+
+    const status = segmentStatus(seg, ds);
+
+    if(status === 'current'){
+      const heading = document.createElement('div');
+      heading.className = 'todo-segment-heading';
+      heading.textContent = seg.label;
+      col.appendChild(heading);
+      segTasks.forEach(task => col.appendChild(buildTodoRow(member, task)));
+      return;
+    }
+
+    const openCount = segTasks.filter(t => t.status !== 'completed').length;
+    const warn = status === 'past' && openCount > 0;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'todo-segment-toggle' + (warn ? ' warn' : '');
+    btn.textContent = seg.label + ' (' + segTasks.length + ')' + (warn ? ' – noch offen' : '');
+
+    const list = document.createElement('div');
+    list.className = 'todo-segment-list collapsed';
+    segTasks.forEach(task => list.appendChild(buildTodoRow(member, task)));
+
+    btn.addEventListener('click', () => list.classList.toggle('collapsed'));
+    col.appendChild(btn);
+    col.appendChild(list);
+  });
+}
 function rfc3339(ds){ return ds + 'T00:00:00.000Z'; }
 const WEEKDAY_LABELS = { 0:'So', 1:'Mo', 2:'Di', 3:'Mi', 4:'Do', 5:'Fr', 6:'Sa' };
 
@@ -795,13 +904,7 @@ async function renderTodoDay(){
     grid.appendChild(col);
 
     const tasks = await fetchTasksInRange(member.id, ds, ds);
-    if(tasks.length === 0){
-      const empty = document.createElement('div');
-      empty.className = 'todo-empty';
-      empty.textContent = 'Keine Aufgaben';
-      col.appendChild(empty);
-    }
-    tasks.forEach(task => col.appendChild(buildTodoRow(member, task)));
+    appendMemberTodos(col, member, tasks, ds);
   }
 }
 
@@ -896,6 +999,7 @@ function getWeekNumber(d){
 /* ---------- Todo-Dialog (Serie anlegen/bearbeiten) ---------- */
 const todoDialog = document.getElementById('todoDialog');
 let editingSeriesMemberId = null;
+let selectedSegment = null;
 
 function populateMemberSelect(){
   const select = document.getElementById('t_member');
@@ -910,12 +1014,22 @@ document.getElementById('weekdayPicker').addEventListener('click', (e) => {
   else { selectedWeekdays.add(day); btn.classList.add('active'); }
 });
 
+document.getElementById('segmentPicker').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-segment]');
+  if(!btn) return;
+  selectedSegment = btn.dataset.segment;
+  document.querySelectorAll('#segmentPicker button').forEach(b => b.classList.toggle('active', b === btn));
+});
+
 function openTodoDialog(prefill){
   editingSeriesId = prefill && prefill.seriesId ? prefill.seriesId : null;
   editingSeriesMemberId = prefill && prefill.memberId ? prefill.memberId : null;
   populateMemberSelect();
   selectedWeekdays.clear();
   document.querySelectorAll('#weekdayPicker button').forEach(b => b.classList.remove('active'));
+
+  selectedSegment = (prefill && prefill.segment) || currentSegmentKey();
+  document.querySelectorAll('#segmentPicker button').forEach(b => b.classList.toggle('active', b.dataset.segment === selectedSegment));
 
   if(prefill && prefill.seriesId){
     document.getElementById('todoDialogTitle').textContent = 'Aufgabe bearbeiten';
@@ -945,12 +1059,14 @@ document.getElementById('todoCancelBtn').addEventListener('click', () => todoDia
 document.getElementById('todoForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   if(selectedWeekdays.size === 0){ alert('Bitte mindestens einen Wochentag auswählen.'); return; }
+  if(!selectedSegment){ alert('Bitte eine Tageszeit auswählen.'); return; }
 
   const title = document.getElementById('t_title').value;
   const memberId = document.getElementById('t_member').value;
   const start = document.getElementById('t_start').value;
   const end = document.getElementById('t_end').value;
   const weekdays = Array.from(selectedWeekdays);
+  const segment = selectedSegment;
 
   const submitBtn = document.querySelector('#todoForm button[type=submit]');
   submitBtn.disabled = true;
@@ -960,7 +1076,7 @@ document.getElementById('todoForm').addEventListener('submit', async (e) => {
     // Bearbeiten = alte Serie löschen, neu anlegen (setzt den Erledigt-Status zurück)
     await deleteSeriesTasks(editingSeriesMemberId, editingSeriesId);
   }
-  await createSeries(memberId, title, weekdays, start, end);
+  await createSeries(memberId, title, weekdays, start, end, segment);
 
   submitBtn.disabled = false;
   submitBtn.textContent = 'Speichern';
@@ -968,7 +1084,7 @@ document.getElementById('todoForm').addEventListener('submit', async (e) => {
   renderTodoView();
 });
 
-async function createSeries(memberId, title, weekdays, start, end){
+async function createSeries(memberId, title, weekdays, start, end, segment){
   const seriesId = 'serie_' + Date.now();
   const dates = [];
   let cursor = new Date(start + 'T00:00:00');
@@ -978,6 +1094,7 @@ async function createSeries(memberId, title, weekdays, start, end){
     cursor = addDays(cursor, 1);
   }
   const listId = taskLists[memberId];
+  const notes = '#' + seriesId + ' #zeit_' + segment;
 
   // In kleinen Gruppen parallel anlegen, um die API nicht zu überlasten
   const chunkSize = 8;
@@ -985,7 +1102,7 @@ async function createSeries(memberId, title, weekdays, start, end){
     const chunk = dates.slice(i, i + chunkSize);
     await Promise.all(chunk.map(ds => apiFetch(TASKS_API + '/lists/' + listId + '/tasks', {
       method: 'POST',
-      body: JSON.stringify({ title, due: rfc3339(ds), notes: '#' + seriesId })
+      body: JSON.stringify({ title, due: rfc3339(ds), notes })
     })));
   }
 }
@@ -1008,7 +1125,7 @@ document.getElementById('todoDeleteBtn').addEventListener('click', async () => {
 const manageDialog = document.getElementById('manageDialog');
 
 async function buildSeriesGroups(){
-  const groups = []; // {seriesId, memberId, title, dates:[], weekdaySet:Set}
+  const groups = []; // {seriesId, memberId, title, segment, dates:[]}
   for(const member of CONFIG.FAMILY_MEMBERS){
     const tasks = await fetchAllTasks(member.id);
     const byId = {};
@@ -1016,7 +1133,7 @@ async function buildSeriesGroups(){
       const m = SERIES_TAG.exec(t.notes || '');
       if(!m) return;
       const sid = 'serie_' + m[1];
-      byId[sid] = byId[sid] || { seriesId: sid, memberId: member.id, title: t.title, dates: [] };
+      byId[sid] = byId[sid] || { seriesId: sid, memberId: member.id, title: t.title, segment: taskSegment(t), dates: [] };
       if(t.due) byId[sid].dates.push(t.due.slice(0,10));
     });
     groups.push(...Object.values(byId));
@@ -1052,6 +1169,7 @@ document.getElementById('manageTodosBtn').addEventListener('click', async () => 
     const end = sortedDates[sortedDates.length - 1];
     const weekdaySet = new Set(sortedDates.map(ds => new Date(ds + 'T00:00:00').getDay()));
     const days = Array.from(weekdaySet).sort().map(d => WEEKDAY_LABELS[d]).join(', ');
+    const segLabel = (DAY_SEGMENTS.find(s => s.key === g.segment) || {}).label || 'ohne Zeitangabe';
 
     const row = document.createElement('div');
     row.className = 'manage-row';
@@ -1059,7 +1177,7 @@ document.getElementById('manageTodosBtn').addEventListener('click', async () => 
     row.innerHTML = `
       <div class="info">
         <strong>${g.title} <span style="color:${member ? member.color : '#999'}">●</span> ${member ? member.name : ''}</strong>
-        <span>${days} · ${start} bis ${end} · ${sortedDates.length} Termine</span>
+        <span>${segLabel} · ${days} · ${start} bis ${end} · ${sortedDates.length} Termine</span>
       </div>
       <button type="button" title="Löschen">×</button>`;
     row.querySelector('.info').addEventListener('click', () => {
@@ -1068,6 +1186,7 @@ document.getElementById('manageTodosBtn').addEventListener('click', async () => 
         seriesId: g.seriesId,
         memberId: g.memberId,
         title: g.title,
+        segment: g.segment,
         start, end,
         weekdays: Array.from(weekdaySet)
       });
@@ -1255,10 +1374,7 @@ async function renderTodayTodoPanel(ds){
     col.className = 'todo-member-col';
     col.innerHTML = `<div class="todo-member-head"><span class="todo-dot" style="background:${member.color}"></span><h3>${member.name}</h3></div>`;
     const tasks = await fetchTasksInRange(member.id, ds, ds);
-    if(tasks.length === 0){
-      col.innerHTML += '<div class="todo-empty">Keine Aufgaben</div>';
-    }
-    tasks.forEach(task => col.appendChild(buildTodoRow(member, task)));
+    appendMemberTodos(col, member, tasks, ds);
     panel.appendChild(col);
   }
 }
